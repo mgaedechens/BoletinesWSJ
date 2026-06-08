@@ -26,17 +26,8 @@ IMAP_PORT = 993
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-KEYWORDS = [
-    "morning",
-    "brief",
-    "daily",
-    "markets",
-    "mercados",
-    "boletín",
-    "boletin",
-    "newsletter",
-    "resumen",
-]
+# Carpeta IMAP donde llegan los boletines de WSJ
+WSJ_FOLDER = "INBOX/WSJ"
 
 
 def decode_str(s: str | None) -> str:
@@ -83,23 +74,22 @@ def extract_bodies(msg) -> tuple[str | None, str | None]:
     return html_body, text_body
 
 
-def is_newsletter(subject: str) -> bool:
-    lower = subject.lower()
-    return any(kw in lower for kw in KEYWORDS)
-
-
 def fetch_newsletters() -> list[dict]:
     # IMAP date format: DD-Mon-YYYY (e.g. 08-Jun-2026)
     today = date.today().strftime("%d-%b-%Y")
 
     conn = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
     conn.login(HOTMAIL_USER, HOTMAIL_PASSWORD)
-    conn.select("INBOX")
+
+    status, _ = conn.select(WSJ_FOLDER)
+    if status != "OK":
+        # Fallback: intentar sin el prefijo INBOX/ (algunos servidores varían)
+        conn.select(WSJ_FOLDER.replace("INBOX/", ""))
 
     _, data = conn.search(None, f'ON "{today}"')
     ids = data[0].split() if data[0] else []
 
-    print(f"  Total emails hoy en inbox: {len(ids)}")
+    print(f"  Emails en {WSJ_FOLDER} hoy: {len(ids)}")
 
     results = []
     for msg_id in ids:
@@ -107,10 +97,6 @@ def fetch_newsletters() -> list[dict]:
         msg = email.message_from_bytes(raw[0][1])
         subject = decode_str(msg.get("Subject", ""))
         sender = decode_str(msg.get("From", ""))
-
-        if not is_newsletter(subject):
-            continue
-
         html, text = extract_bodies(msg)
         results.append({"subject": subject, "sender": sender, "html": html, "text": text})
 
