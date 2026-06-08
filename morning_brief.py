@@ -29,16 +29,8 @@ SMTP_PORT = 587
 # Carpeta destino donde se archivan los boletines
 WSJ_FOLDER = "INBOX/WSJ"
 
-# Fragmentos de título de cada newsletter suscrito.
-# Se comparan en minúsculas contra el Subject del email.
-WSJ_NEWSLETTERS = [
-    "markets a.m",
-    "markets p.m",
-    "wsj technology",
-    "ai & business",
-    "intelligent investor",
-    "wsj china",
-]
+# Todos los newsletters de WSJ vienen de este remitente exacto
+WSJ_SENDER = "access@interactive.wsj.com"
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +81,6 @@ def extract_bodies(msg) -> tuple[str | None, str | None]:
     return html_body, text_body
 
 
-def is_wsj_newsletter(subject: str) -> bool:
-    lower = subject.lower()
-    return any(kw in lower for kw in WSJ_NEWSLETTERS)
-
-
 # ---------------------------------------------------------------------------
 # IMAP: buscar en INBOX, mover a WSJ_FOLDER
 # ---------------------------------------------------------------------------
@@ -111,11 +98,11 @@ def fetch_newsletters() -> list[dict]:
     conn.login(HOTMAIL_USER, HOTMAIL_PASSWORD)
     conn.select("INBOX")
 
-    # Buscar solo correos de hoy cuyo remitente sea del dominio wsj.com
-    _, data = conn.search(None, f'ON "{today}" FROM "wsj.com"')
+    # Todos los newsletters vienen de este sender exacto — sin filtro de subject
+    _, data = conn.search(None, f'ON "{today}" FROM "{WSJ_SENDER}"')
     ids = data[0].split() if data[0] else []
 
-    print(f"  Emails de wsj.com en INBOX hoy: {len(ids)}")
+    print(f"  Emails de {WSJ_SENDER} en INBOX hoy: {len(ids)}")
 
     results = []
     to_move = []
@@ -125,10 +112,6 @@ def fetch_newsletters() -> list[dict]:
         msg = email.message_from_bytes(raw[0][1])
         subject = decode_str(msg.get("Subject", ""))
         sender = decode_str(msg.get("From", ""))
-
-        if not is_wsj_newsletter(subject):
-            continue
-
         html, text = extract_bodies(msg)
         results.append({"subject": subject, "sender": sender, "html": html, "text": text})
         to_move.append(msg_id)
