@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compilador diario de boletines financieros: Hotmail → Gmail."""
+"""Compilador diario de boletines WSJ: Hotmail INBOX → carpeta WSJ → Gmail."""
 
 import email
 import imaplib
@@ -26,9 +26,24 @@ IMAP_PORT = 993
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Carpeta IMAP donde llegan los boletines de WSJ
+# Carpeta destino donde se archivan los boletines
 WSJ_FOLDER = "INBOX/WSJ"
 
+# Fragmentos de título de cada newsletter suscrito.
+# Se comparan en minúsculas contra el Subject del email.
+WSJ_NEWSLETTERS = [
+    "markets a.m",
+    "markets p.m",
+    "wsj technology",
+    "ai & business",
+    "intelligent investor",
+    "wsj china",
+]
+
+
+# ---------------------------------------------------------------------------
+# Helpers de decodificación
+# ---------------------------------------------------------------------------
 
 def decode_str(s: str | None) -> str:
     if not s:
@@ -74,44 +89,71 @@ def extract_bodies(msg) -> tuple[str | None, str | None]:
     return html_body, text_body
 
 
+def is_wsj_newsletter(subject: str) -> bool:
+    lower = subject.lower()
+    return any(kw in lower for kw in WSJ_NEWSLETTERS)
+
+
+# ---------------------------------------------------------------------------
+# IMAP: buscar en INBOX, mover a WSJ_FOLDER
+# ---------------------------------------------------------------------------
+
+def move_to_wsj(conn: imaplib.IMAP4_SSL, msg_id: bytes) -> None:
+    """Copia el mensaje a WSJ_FOLDER y lo borra del INBOX."""
+    conn.copy(msg_id, WSJ_FOLDER)
+    conn.store(msg_id, "+FLAGS", "\\Deleted")
+
+
 def fetch_newsletters() -> list[dict]:
-    # IMAP date format: DD-Mon-YYYY (e.g. 08-Jun-2026)
-    today = date.today().strftime("%d-%b-%Y")
+    today = date.today().strftime("%d-%b-%Y")  # e.g. 08-Jun-2026
 
     conn = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
     conn.login(HOTMAIL_USER, HOTMAIL_PASSWORD)
+    conn.select("INBOX")
 
-    status, _ = conn.select(WSJ_FOLDER)
-    if status != "OK":
-        # Fallback: intentar sin el prefijo INBOX/ (algunos servidores varían)
-        conn.select(WSJ_FOLDER.replace("INBOX/", ""))
-
-    _, data = conn.search(None, f'ON "{today}"')
+    # Buscar solo correos de hoy cuyo remitente sea del dominio wsj.com
+    _, data = conn.search(None, f'ON "{today}" FROM "wsj.com"')
     ids = data[0].split() if data[0] else []
 
-    print(f"  Emails en {WSJ_FOLDER} hoy: {len(ids)}")
+    print(f"  Emails de wsj.com en INBOX hoy: {len(ids)}")
 
     results = []
+    to_move = []
+
     for msg_id in ids:
         _, raw = conn.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(raw[0][1])
         subject = decode_str(msg.get("Subject", ""))
         sender = decode_str(msg.get("From", ""))
+
+        if not is_wsj_newsletter(subject):
+            continue
+
         html, text = extract_bodies(msg)
         results.append({"subject": subject, "sender": sender, "html": html, "text": text})
+        to_move.append(msg_id)
+
+    # Mover los emails encontrados a la carpeta WSJ
+    if to_move:
+        for msg_id in to_move:
+            move_to_wsj(conn, msg_id)
+        conn.expunge()
+        print(f"  Movidos {len(to_move)} email(s) a {WSJ_FOLDER}")
 
     conn.logout()
     return results
 
 
-def extract_body_content(full_html: str) -> str:
-    """Extrae <body> + <style> de un HTML completo para incrustar sin conflictos de estructura."""
-    soup = BeautifulSoup(full_html, "lxml")
+# ---------------------------------------------------------------------------
+# Compilar HTML
+# ---------------------------------------------------------------------------
 
+def extract_body_content(full_html: str) -> str:
+    """Retorna <style> + <body> de un HTML completo para incrustar de forma segura."""
+    soup = BeautifulSoup(full_html, "lxml")
     styles = "".join(str(tag) for tag in soup.find_all("style"))
     body = soup.find("body")
     content = str(body) if body else full_html
-
     return styles + content
 
 
@@ -175,6 +217,10 @@ def build_compiled_html(newsletters: list[dict]) -> str:
 </html>"""
 
 
+# ---------------------------------------------------------------------------
+# Gmail SMTP
+# ---------------------------------------------------------------------------
+
 def send_email(subject: str, html: str) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -189,16 +235,20 @@ def send_email(subject: str, html: str) -> None:
         s.sendmail(GMAIL_USER, GMAIL_USER, msg.as_string())
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Conectando a {HOTMAIL_USER}…")
 
     newsletters = fetch_newsletters()
 
     if not newsletters:
-        print("Sin boletines que coincidan hoy. No se envía email.")
+        print("Sin boletines WSJ hoy. No se envía email.")
         return
 
-    print(f"  Boletines filtrados: {len(newsletters)}")
+    print(f"  Boletines encontrados: {len(newsletters)}")
     for nl in newsletters:
         print(f"    · {nl['subject']}")
 
