@@ -23,6 +23,5 @@ jobs:
 
       - name: Ejecutar morning_brief.py
         env:
-          HOTMAIL_PASSWORD: ${{ secrets.HOTMAIL_PASSWORD }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python morning_brief.py

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compilador diario de boletines WSJ: Hotmail INBOX → carpeta WSJ → Gmail."""
+"""Compilador diario de boletines WSJ: Gmail IMAP → Gmail SMTP."""
 
 import email
 import imaplib
@@ -15,21 +15,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HOTMAIL_USER = "matias.gaedechens@hotmail.com"
-HOTMAIL_PASSWORD = os.environ["HOTMAIL_PASSWORD"]
 GMAIL_USER = "matiasgaedechens1@gmail.com"
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 
-IMAP_SERVER = "outlook.office365.com"
+IMAP_SERVER = "imap.gmail.com"
 IMAP_PORT = 993
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Carpeta destino donde se archivan los boletines
-WSJ_FOLDER = "INBOX/WSJ"
-
-# Todos los newsletters de WSJ vienen de este remitente exacto
+# Todos los newsletters de WSJ vienen de este remitente exacto.
+# Hotmail los reenvía a Gmail mediante la regla configurada en Outlook.
 WSJ_SENDER = "access@interactive.wsj.com"
 
 
@@ -82,31 +78,24 @@ def extract_bodies(msg) -> tuple[str | None, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# IMAP: buscar en INBOX, mover a WSJ_FOLDER
+# IMAP: leer desde Gmail
 # ---------------------------------------------------------------------------
-
-def move_to_wsj(conn: imaplib.IMAP4_SSL, msg_id: bytes) -> None:
-    """Copia el mensaje a WSJ_FOLDER y lo borra del INBOX."""
-    conn.copy(msg_id, WSJ_FOLDER)
-    conn.store(msg_id, "+FLAGS", "\\Deleted")
-
 
 def fetch_newsletters() -> list[dict]:
     today = date.today().strftime("%d-%b-%Y")  # e.g. 08-Jun-2026
 
     conn = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-    conn.login(HOTMAIL_USER, HOTMAIL_PASSWORD)
-    conn.select("INBOX")
+    conn.login(GMAIL_USER, GMAIL_APP_PASSWORD)
 
-    # Todos los newsletters vienen de este sender exacto — sin filtro de subject
+    # Buscar en All Mail para encontrar emails aunque estén archivados
+    conn.select('"[Gmail]/All Mail"')
+
     _, data = conn.search(None, f'ON "{today}" FROM "{WSJ_SENDER}"')
     ids = data[0].split() if data[0] else []
 
-    print(f"  Emails de {WSJ_SENDER} en INBOX hoy: {len(ids)}")
+    print(f"  Emails de {WSJ_SENDER} en Gmail hoy: {len(ids)}")
 
     results = []
-    to_move = []
-
     for msg_id in ids:
         _, raw = conn.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(raw[0][1])
@@ -114,14 +103,6 @@ def fetch_newsletters() -> list[dict]:
         sender = decode_str(msg.get("From", ""))
         html, text = extract_bodies(msg)
         results.append({"subject": subject, "sender": sender, "html": html, "text": text})
-        to_move.append(msg_id)
-
-    # Mover los emails encontrados a la carpeta WSJ
-    if to_move:
-        for msg_id in to_move:
-            move_to_wsj(conn, msg_id)
-        conn.expunge()
-        print(f"  Movidos {len(to_move)} email(s) a {WSJ_FOLDER}")
 
     conn.logout()
     return results
@@ -132,7 +113,6 @@ def fetch_newsletters() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def extract_body_content(full_html: str) -> str:
-    """Retorna <style> + <body> de un HTML completo para incrustar de forma segura."""
     soup = BeautifulSoup(full_html, "lxml")
     styles = "".join(str(tag) for tag in soup.find_all("style"))
     body = soup.find("body")
@@ -223,7 +203,7 @@ def send_email(subject: str, html: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Conectando a {HOTMAIL_USER}…")
+    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Buscando boletines WSJ en Gmail…")
 
     newsletters = fetch_newsletters()
 
@@ -231,7 +211,7 @@ def main() -> None:
         print("Sin boletines WSJ hoy. No se envía email.")
         return
 
-    print(f"  Boletines encontrados: {len(newsletters)}")
+    print(f"  Encontrados: {len(newsletters)}")
     for nl in newsletters:
         print(f"    · {nl['subject']}")
 
@@ -239,7 +219,7 @@ def main() -> None:
     subject = f"📰 Boletines del día — {today_str}"
     html = build_compiled_html(newsletters)
 
-    print(f"  Enviando a {GMAIL_USER}…")
+    print(f"  Enviando compilado a {GMAIL_USER}…")
     send_email(subject, html)
     print("✓ Email enviado correctamente.")
 
