@@ -1,0 +1,28 @@
+name: Morning Brief
+
+on:
+  schedule:
+    - cron: '30 11 * * 1-5'   # 11:30 UTC = 8:30 AM Santiago (UTC-3)
+  workflow_dispatch:           # permite ejecutar manualmente desde GitHub
+
+jobs:
+  send-brief:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar morning_brief.py
+        env:
+          HOTMAIL_PASSWORD: ${{ secrets.HOTMAIL_PASSWORD }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python morning_brief.py
