@@ -87,8 +87,16 @@ def fetch_newsletters() -> list[dict]:
     conn = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
     conn.login(GMAIL_USER, GMAIL_APP_PASSWORD)
 
-    # Buscar en All Mail para encontrar emails aunque estén archivados
-    conn.select('"[Gmail]/All Mail"')
+    # Intentar varias carpetas según idioma de Gmail (español vs inglés)
+    selected = False
+    for folder in ('"[Gmail]/All Mail"', '"[Gmail]/Todos"', "INBOX"):
+        status, _ = conn.select(folder)
+        if status == "OK":
+            selected = True
+            print(f"  Carpeta: {folder}")
+            break
+    if not selected:
+        raise RuntimeError("No se pudo seleccionar ninguna carpeta de Gmail")
 
     _, data = conn.search(None, f'ON "{today}" FROM "{WSJ_SENDER}"')
     ids = data[0].split() if data[0] else []
