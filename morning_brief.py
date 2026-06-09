@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compilador diario de boletines WSJ: Gmail IMAP → Gmail SMTP."""
 
+import calendar
 import email
 import imaplib
 import os
@@ -23,10 +24,6 @@ IMAP_PORT = 993
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-
-# Todos los newsletters de WSJ vienen de este remitente exacto.
-# Hotmail los reenvía a Gmail mediante la regla configurada en Outlook.
-WSJ_SENDER = "access@interactive.wsj.com"
 
 
 # ---------------------------------------------------------------------------
@@ -82,14 +79,16 @@ def extract_bodies(msg) -> tuple[str | None, str | None]:
 # ---------------------------------------------------------------------------
 
 def fetch_newsletters() -> list[dict]:
-    today = date.today().strftime("%d-%b-%Y")  # e.g. 08-Jun-2026
+    # Forzar mes en inglés para la búsqueda IMAP (independiente de la locale del SO)
+    d = date.today()
+    today = f"{d.day:02d}-{calendar.month_abbr[d.month]}-{d.year}"  # e.g. 09-Jun-2026
 
     conn = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
     conn.login(GMAIL_USER, GMAIL_APP_PASSWORD)
 
-    # Intentar varias carpetas según idioma de Gmail (español vs inglés)
+    # Probar primero la etiqueta WSJ, luego All Mail en ambos idiomas
     selected = False
-    for folder in ('"[Gmail]/All Mail"', '"[Gmail]/Todos"', "INBOX"):
+    for folder in ("WSJ", '"[Gmail]/All Mail"', '"[Gmail]/Todos"', "INBOX"):
         status, _ = conn.select(folder)
         if status == "OK":
             selected = True
@@ -98,10 +97,10 @@ def fetch_newsletters() -> list[dict]:
     if not selected:
         raise RuntimeError("No se pudo seleccionar ninguna carpeta de Gmail")
 
-    _, data = conn.search(None, f'ON "{today}" FROM "{WSJ_SENDER}"')
+    _, data = conn.search(None, f'ON "{today}"')
     ids = data[0].split() if data[0] else []
 
-    print(f"  Emails de {WSJ_SENDER} en Gmail hoy: {len(ids)}")
+    print(f"  Emails en carpeta WSJ hoy: {len(ids)}")
 
     results = []
     for msg_id in ids:
@@ -121,7 +120,7 @@ def fetch_newsletters() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def extract_body_content(full_html: str) -> str:
-    soup = BeautifulSoup(full_html, "lxml")
+    soup = BeautifulSoup(full_html, "html.parser")
     styles = "".join(str(tag) for tag in soup.find_all("style"))
     body = soup.find("body")
     content = str(body) if body else full_html
