@@ -1,9 +1,7 @@
 name: Morning Brief
 
 on:
-  schedule:
-    - cron: '0 12 * * 1-5'    # 12:00 UTC = 9:00 AM Santiago (UTC-3)
-  workflow_dispatch:           # permite ejecutar manualmente desde GitHub
+  workflow_dispatch:           # disparado por cron-job.org exactamente a las 9 AM Santiago
 
 jobs:
   send-brief:
